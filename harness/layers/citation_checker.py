@@ -67,7 +67,7 @@ class CitationChecker(Middleware):
 
     name = "citation_checker"
 
-    def after_agent(self, ctx, report):
+    # def after_agent(self, ctx, report):
         # TODO (§11): khoảng 10-25 dòng.
         #  1. Lấy report["claims"]; bỏ qua nếu rỗng hoặc ctx.corpus là None.
         #  2. Với mỗi claim, gọi ctx.corpus.get(claim["doc_id"]).
@@ -80,4 +80,45 @@ class CitationChecker(Middleware):
         #     Đổi doc_id sang nó, GIỮ NGUYÊN text.
         #  4. Không tìm được nguồn nào -> để `critic` xử lý, đừng bịa doc_id.
         #  5. Cập nhật report["citations"] = danh sách doc_id đã sắp xếp.
-        return report  # <- mặc định KHÔNG LÀM GÌ: agent vẫn chạy được
+        # return report  # <- mặc định KHÔNG LÀM GÌ: agent vẫn chạy được
+
+    def after_agent(self, ctx, report):
+        claims = report.get("claims")
+        if not isinstance(claims, list) or not claims or ctx.corpus is None:
+            return report
+
+        fixed = []
+        for claim in claims:
+            if not isinstance(claim, dict):
+                fixed.append(claim)
+                continue
+
+            text = claim.get("text")
+            doc_id = claim.get("doc_id")
+            if not isinstance(text, str) or not text:
+                fixed.append(claim)
+                continue
+
+            cited = ctx.corpus.get(doc_id) if isinstance(doc_id, str) else None
+            if cited is not None and text in cited.body:
+                fixed.append(claim)
+                continue
+
+            source = next(
+                (
+                    doc for doc in ctx.corpus.docs
+                    if doc.body in ctx.observed_text and text in doc.body
+                ),
+                None,
+            )
+            fixed.append({**claim, "doc_id": source.doc_id} if source else claim)
+
+        report["claims"] = fixed
+        report["citations"] = sorted({
+            claim.get("doc_id")
+            for claim in fixed
+            if isinstance(claim, dict)
+            and isinstance(claim.get("doc_id"), str)
+            and claim.get("doc_id")
+        })
+        return report
